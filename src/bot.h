@@ -20,6 +20,7 @@ typedef void (*bot_stop_cb_t)(bot_data *bot, bot_stop_reason reason);
 typedef struct irc_message irc_message;
 typedef struct irc_command irc_command;
 typedef struct irc_trigger irc_trigger;
+typedef struct bridge_data bridge_data;
 
 enum bot_stop_reason {
 	BOT_STOP_DNSFAIL = 0,
@@ -86,7 +87,15 @@ struct irc_trigger {
 	void (*handler)(bot_data *bot, irc_message *msg, const char *name, char *arg);
 };
 
+struct bridge_data {
+	unsigned char bot1;
+	char *channel1;
+	unsigned char bot2;
+	char *channel2;
+};
+
 extern bot_data *bots[MAX_BOTS];
+extern bridge_data bridge;
 
 void ICACHE_FLASH_ATTR bot_connect(bot_data *bot);
 void ICACHE_FLASH_ATTR bot_stop_callback(bot_data *bot, bot_stop_reason reason);

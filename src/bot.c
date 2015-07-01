@@ -3,6 +3,8 @@
 
 bot_data *bots[MAX_BOTS];
 
+bridge_data bridge;
+
 #define DEBUG
 
 void ICACHE_FLASH_ATTR
@@ -197,6 +199,71 @@ handle_bot_trigger(bot_data *bot, irc_message *msg, const char *name,
 }
 
 static void ICACHE_FLASH_ATTR
+handle_bridge_trigger(bot_data *bot, irc_message *msg, const char *name,
+                      char *args)
+{
+	char *p, *channel;
+
+	if (bridge.channel1 || bridge.channel2) {
+		if (bridge.channel1) {
+			free(bridge.channel1);
+			bridge.channel1 = NULL;
+		}
+		if (bridge.channel2) {
+			free(bridge.channel2);
+			bridge.channel2 = NULL;
+		}
+		irc_send(bot, "PRIVMSG %s :bridge removed", msg->reply);
+	}
+
+	p = args;
+	bridge.bot1 = atoi(p);
+	while (*p && *p != ':') {
+		p++;
+	}
+	if (*p == ':') {
+		*p++ = '\0';
+	}
+	channel = p;
+	while (*p && *p != ' ') {
+		p++;
+	}
+	if (*p == ' ') {
+		*p++ = '\0';
+	}
+	bridge.channel1 = *channel ? strdup(channel) : NULL;
+	bridge.bot2 = atoi(p);
+	while (*p && *p != ':') {
+		p++;
+	}
+	if (*p == ':') {
+		*p++ = '\0';
+	}
+	channel = p;
+	while (*p && *p != ' ') {
+		p++;
+	}
+	if (*p == ' ') {
+		*p++ = '\0';
+	}
+	bridge.channel2 = *channel ? strdup(channel) : NULL;
+
+	if (bridge.bot1 >= MAX_BOTS || bridge.channel1 == NULL ||
+	    bridge.bot2 >= MAX_BOTS || bridge.channel2 == NULL) {
+		if (bridge.channel1) {
+			free(bridge.channel1);
+		}
+		if (bridge.channel2) {
+			free(bridge.channel2);
+		}
+		return;
+	}
+
+	irc_send(bot, "PRIVMSG %s :bridge created (%d:%s <-> %d:%s)", msg->reply,
+	         bridge.bot1, bridge.channel1, bridge.bot2, bridge.channel2);
+}
+
+static void ICACHE_FLASH_ATTR
 handle_nick_trigger(bot_data *bot, irc_message *msg, const char *name,
                     char *args)
 {
@@ -220,10 +287,11 @@ handle_raw_trigger(bot_data *bot, irc_message *msg, const char *name,
 }
 
 static irc_trigger triggers[] = {
-	{"bot",  handle_bot_trigger },
-	{"nick", handle_nick_trigger},
-	{"raw",  handle_raw_trigger },
-	{NULL,   NULL               }
+	{"bot",    handle_bot_trigger   },
+	{"bridge", handle_bridge_trigger},
+	{"nick",   handle_nick_trigger  },
+	{"raw",    handle_raw_trigger   },
+	{NULL,     NULL                 }
 };
 
 static void ICACHE_FLASH_ATTR
@@ -269,6 +337,33 @@ snatch_nick(bot_data *bot, const char *seen_nick)
 		if (strcasecmp(bot->nick.desired, seen_nick) == 0) {
 			irc_send(bot, "NICK %s", bot->nick.desired);
 		}
+	}
+}
+
+static void ICACHE_FLASH_ATTR
+handle_bridge(bot_data *bot, irc_message *msg)
+{
+	if (!bots[bridge.bot1] || !bridge.channel1 || !bots[bridge.bot2] ||
+	    !bridge.channel2 ) {
+		if (bridge.channel1) {
+			free(bridge.channel1);
+			bridge.channel1 = NULL;
+		}
+		if (bridge.channel2) {
+			free(bridge.channel2);
+			bridge.channel2 = NULL;
+		}
+		return;
+	}
+
+	if ((bot->index == bridge.bot1) &&
+	    strcasecmp(msg->param[0], bridge.channel1) == 0) {
+		irc_send(bots[bridge.bot2], "%s %s :<%s:%s> %s", msg->command,
+		         bridge.channel2, msg->param[0], msg->source, msg->param[1]);
+	} else if ((bot->index == bridge.bot2) &&
+	           strcasecmp(msg->param[0], bridge.channel2) == 0) {
+		irc_send(bots[bridge.bot1], "%s %s :<%s:%s> %s", msg->command,
+		         bridge.channel1, msg->param[0], msg->source, msg->param[1]);
 	}
 }
 
@@ -392,6 +487,8 @@ handle_privmsg_command(bot_data *bot, irc_message *msg)
 			handle_trigger(bot, msg, p);
 		}
 	}
+
+	handle_bridge(bot, msg);
 }
 
 static void ICACHE_FLASH_ATTR

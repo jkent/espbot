@@ -61,6 +61,7 @@ void ICACHE_FLASH_ATTR user_init(void)
 	printf("\n");
 
 	bzero(bots, sizeof(bots));
+	bzero(&bridge, sizeof(bridge));
 
 #ifdef USE_SECURE
 	//espconn_secure_ca_enable(0x01, 0x3C);
