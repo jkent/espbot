@@ -352,6 +352,12 @@ parse_message(char *s, irc_message *msg)
 		*(msg->host - 1) = '\0';
 	}
 
+	if (msg->command && msg->params > 0 &&
+	    (strcmp(msg->command, "PRIVMSG") == 0 ||
+	    strcmp(msg->command, "NOTICE") == 0)) {
+		msg->reply = (msg->param[0][0] == '#') ? msg->param[0] : msg->source;
+	}
+
 	return !!msg->command;
 }
 

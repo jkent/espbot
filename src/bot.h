@@ -67,6 +67,7 @@ struct irc_message {
 	char *command;
 	int params;
 	char *param[IRC_MAX_PARAM];
+	char *reply;
 };
 
 struct irc_command {
