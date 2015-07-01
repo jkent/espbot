@@ -23,9 +23,9 @@ char *ICACHE_FLASH_ATTR strdup(const char *s);
 #define strstr ets_strstr
 #define malloc pvPortMalloc
 #define zalloc pvPortZalloc
-#define calloc(nmemb, size) \
-    pvPortZalloc((nmemb) * (size))
-#define free pvPortFree
+#define calloc pvPortCalloc
+#define realloc pvPortRealloc
+#define free vPortFree
 #define vsnprintf ets_vsnprintf
 #define sprintf ets_sprintf
 #define printf(format, ...) \
