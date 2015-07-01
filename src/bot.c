@@ -1,7 +1,23 @@
 #include <esp8266.h>
 #include "bot.h"
 
+bot_data *bots[MAX_BOTS];
+
 #define DEBUG
+
+void ICACHE_FLASH_ATTR
+bot_stop_callback(bot_data *bot, bot_stop_reason reason)
+{
+	if (reason != BOT_STOP_DNSFAIL && reason != BOT_STOP_TERMINATED) {
+		bot_connect(bot);
+	} else {
+		free(bot->host);
+		if (bot->autojoin_channels) {
+			free(bot->autojoin_channels);
+		}
+		free(bot);
+	}
+}
 
 static void ICACHE_FLASH_ATTR __attribute__ ((format (printf, 2, 3)))
 irc_send(bot_data *bot, const char *fmt, ...)
@@ -39,6 +55,148 @@ irc_send(bot_data *bot, const char *fmt, ...)
 *****************************************************************************/
 
 static void ICACHE_FLASH_ATTR
+handle_bot_add_trigger(bot_data *bot, irc_message *msg, char *args)
+{
+	int i;
+	bot_data *other;
+	char *p, *host, *autojoin = NULL;
+	unsigned short port = 6667;
+
+	p = args;
+	host = p;
+	while (*p && *p != ':' && *p != ' ') {
+		p++;
+	}
+	if (*p == ':') {
+		port = atoi(p + 1);
+		while (*p && *p != ' ') {
+			p++;
+		}
+	}
+
+	if (*p) {
+		*p++ = '\0';
+		autojoin = p;
+		while (*p && *p != ' ') {
+			p++;
+		}
+	}
+
+	*p = '\0';
+
+	if (strlen(host) == 0) {
+		irc_send(bot, "PRIVMSG %s :Usage: bot add HOST[:PORT] [CHANNELS]",
+		         msg->reply);
+		return;
+	}
+
+	printf("addbot %s:%d %s\n", host, port, autojoin);
+
+	if (autojoin && strlen(autojoin) == 0) {
+		autojoin = NULL;
+	}
+
+	for (i = 0; i < MAX_BOTS; i++) {
+		if (!bots[i]) {
+			break;
+		}
+	}
+
+	if (i == MAX_BOTS) {
+		irc_send(bot, "PRIVMSG %s :No more slots available!", msg->reply);
+		return;
+	}
+
+	other = zalloc(sizeof(bot_data));
+	bots[i] = other;
+	other->index = i;
+	other->host = strdup(host);
+	other->tcp.remote_port = 6667;
+	other->directed_triggers = true;
+	other->autojoin_channels = strdup(autojoin);
+	other->stop_callback = bot_stop_callback;
+	bot_connect(other);
+
+	irc_send(bot, "PRIVMSG %s :bot %d spawned", msg->reply, i);
+}
+
+static void ICACHE_FLASH_ATTR
+handle_bot_del_trigger(bot_data *bot, irc_message *msg, char *args)
+{
+	int i;
+	bot_data *other;
+
+	if (!*args) {
+		irc_send(bot, "PRIVMSG %s :Usage: bot del SLOT", msg->reply);
+		return;
+	}
+
+	i = atoi(args);
+
+	if (i < 0 || i >= MAX_BOTS) {
+		irc_send(bot, "PRIVMSG %s :bot slot out of range!", msg->reply);
+		return;
+	}
+
+	if (!bots[i]) {
+		irc_send(bot, "PRIVMSG %s :slot %d is already empty!", msg->reply, i);
+		return;
+	}
+
+	other = bots[i];
+	other->state = BOT_STATE_TERMINATING;
+	irc_send(other, "QUIT :I've been destroyed!");
+	bots[i] = NULL;
+
+	irc_send(bot, "PRIVMSG %s :bot %d destroyed", msg->reply, i);
+}
+
+static void ICACHE_FLASH_ATTR
+handle_bot_list_trigger(bot_data *bot, irc_message *msg, char *args)
+{
+	int i;
+	bot_data *other;
+
+	for (i = 0; i < MAX_BOTS; i++) {
+		other = bots[i];
+		if (!other) {
+			continue;
+		}
+
+		irc_send(bot, "PRIVMSG %s :id: %d, server: %s:%d, nick: %s",
+		         msg->reply, i, other->host, other->tcp.remote_port,
+		         other->nick.current);
+	}
+}
+
+static void ICACHE_FLASH_ATTR
+handle_bot_trigger(bot_data *bot, irc_message *msg, const char *name,
+                   char *args)
+{
+	char *p = args;
+
+	while (*p && *p != ' ') {
+		p++;
+	}
+	if (*p == ' ') {
+		*p++ = '\0';
+	}
+	while (*p == ' ') {
+		p++;
+	}
+
+	if (strcasecmp(args, "add") == 0) {
+		handle_bot_add_trigger(bot, msg, p);
+	} else if (strcasecmp(args, "del") == 0) {
+		handle_bot_del_trigger(bot, msg, p);
+	} else if (strcasecmp(args, "list") == 0) {
+		handle_bot_list_trigger(bot, msg, p);
+	} else {
+		irc_send(bot, "PRIVMSG %s :Usage: bot {add|del|list}", msg->reply);
+	}
+}
+
+static void ICACHE_FLASH_ATTR
 handle_nick_trigger(bot_data *bot, irc_message *msg, const char *name,
                     char *args)
 {
@@ -62,6 +220,7 @@ handle_raw_trigger(bot_data *bot, irc_message *msg, const char *name,
 }
 
 static irc_trigger triggers[] = {
+	{"bot",  handle_bot_trigger },
 	{"nick", handle_nick_trigger},
 	{"raw",  handle_raw_trigger },
 	{NULL,   NULL               }
@@ -163,7 +322,8 @@ handle_433_command(bot_data *bot, irc_message *msg)
 static void ICACHE_FLASH_ATTR
 handle_error_command(bot_data *bot, irc_message *msg)
 {
-	if (bot->state != BOT_STATE_KILLED) {
+	if (bot->state != BOT_STATE_KILLED &&
+	    bot->state != BOT_STATE_TERMINATING) {
 		bot->state = BOT_STATE_QUIT;
 	}
 }
@@ -478,6 +638,9 @@ disconnect_callback(void *arg)
 		break;
 	case BOT_STATE_TIMEOUT:
 		reason = BOT_STOP_TIMEOUT;
+		break;
+	case BOT_STATE_TERMINATING:
+		reason = BOT_STOP_TERMINATED;
 		break;
 	default:
 		reason = BOT_STOP_DISCONNECT;

@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 
+#define MAX_BOTS 5
+
 #define IRC_NICKLEN 9
 #define IRC_HOSTLEN 63
 #define IRC_MSGLEN 510
@@ -25,6 +27,7 @@ enum bot_stop_reason {
 	BOT_STOP_DISCONNECT,
 	BOT_STOP_KILLED,
 	BOT_STOP_QUIT,
+	BOT_STOP_TERMINATED,
 };
 
 enum bot_state {
@@ -34,9 +37,11 @@ enum bot_state {
 	BOT_STATE_KILLED,
 	BOT_STATE_QUIT,
 	BOT_STATE_TIMEOUT,
+	BOT_STATE_TERMINATING,
 };
 
 struct bot_data {
+	unsigned char index;
 	struct espconn conn;
 	esp_tcp tcp;
 	ETSTimer timer;
@@ -81,6 +86,8 @@ struct irc_trigger {
 	void (*handler)(bot_data *bot, irc_message *msg, const char *name, char *arg);
 };
 
-void ICACHE_FLASH_ATTR bot_connect(bot_data *bot);
+extern bot_data *bots[MAX_BOTS];
 
+void ICACHE_FLASH_ATTR bot_connect(bot_data *bot);
+void ICACHE_FLASH_ATTR bot_stop_callback(bot_data *bot, bot_stop_reason reason);
 #endif /* BOT_H */

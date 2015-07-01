@@ -8,8 +8,6 @@ unsigned char *default_private_key;
 unsigned int default_private_key_len = 0;
 #endif
 
-static bot_data bot;
-
 //#define SHOW_HEAP_USE
 
 #ifdef SHOW_HEAP_USE
@@ -23,29 +21,37 @@ prHeapTimerCb(void *arg)
 #endif
 
 static void ICACHE_FLASH_ATTR
-bot_stop_callback(bot_data *bot, bot_stop_reason reason)
-{
-	if (reason != BOT_STOP_DNSFAIL) {
-		bot_connect(bot);
-	}
-}
-
-static void ICACHE_FLASH_ATTR
 wifiEventHandlerCb(System_Event_t *evt)
 {
+	int i;
+	bot_data *bot;
+	bool active;
+
 	if (evt->event == EVENT_STAMODE_GOT_IP) {
-		os_bzero(&bot, sizeof(bot));
-		bot.host = "jkent.net";
+		active = false;
+		for (i = 0; i < MAX_BOTS; i++) {
+			if (bots[i]) {
+				bot_connect(bots[i]);
+				active = true;
+			}
+		}
+
+		if (!active) {
+			bot = zalloc(sizeof(bot_data));
+			bots[0] = bot;
+			bot->index = 0;
+			bot->host = strdup("irc.jkent.net");
 #ifdef USE_SECURE
-		bot.tcp.remote_port = 6697;
-		bot.secure = true;
+			bot->tcp.remote_port = 6697;
+			bot->secure = true;
 #else
-		bot.tcp.remote_port = 6667;
+			bot->tcp.remote_port = 6667;
 #endif
-		bot.directed_triggers = true;
-		bot.autojoin_channels = "#espbot";
-		bot.stop_callback = bot_stop_callback;
-		bot_connect(&bot);
+			bot->directed_triggers = true;
+			bot->autojoin_channels = strdup("#espbot");
+			bot->stop_callback = bot_stop_callback;
+			bot_connect(bot);
+		}
 	}
 }
 
@@ -53,6 +59,8 @@ void ICACHE_FLASH_ATTR user_init(void)
 {
 	stdout_init();
 	printf("\n");
+
+	bzero(bots, sizeof(bots));
 
 #ifdef USE_SECURE
 	//espconn_secure_ca_enable(0x01, 0x3C);
